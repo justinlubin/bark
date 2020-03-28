@@ -13,6 +13,9 @@ type 'x token =
 
 (* Building blocks *)
 
+val is_alpha : char -> bool
+val is_num : char -> bool
+
 val int : 'x -> 'x -> ('c, 'x, int) t
 val float : 'x -> 'x -> ('c, 'x, float) t
 

@@ -1,3 +1,81 @@
+(* Character Predicates *)
+(* Source: https://stackoverflow.com/a/49184157/1157526 *)
+
+let is_alpha : char -> bool =
+  function
+    | 'a' .. 'z'
+    | 'A' .. 'Z' ->
+        true
+
+    | _ ->
+        false
+
+let is_num : char -> bool =
+  function
+    | '0' .. '9' ->
+        true
+
+    | _ ->
+        false
+
+(* Low-Level Helpers *)
+
+let is_sub_string : string -> int -> int -> int -> string -> int * int * int =
+  fun small_string offset row col big_string ->
+    let small_length =
+      String.length small_string
+    in
+    let (offset', row', col') =
+      (ref offset, ref row, ref col)
+    in
+    let is_good =
+      ref (offset + small_length <= String.length big_string)
+    in
+    let i =
+      ref 0
+    in
+    while (!is_good && !i < small_length) do
+      let big_letter =
+        String.get big_string !offset'
+      in
+      is_good :=
+        String.get small_string !i = big_letter;
+      i :=
+        !i + 1;
+      offset' :=
+        !offset' + 1;
+      begin if big_letter = '\n' then
+        begin
+          row' := !row' + 1;
+          col' := 1
+        end
+      else
+        begin
+          col' := !col' + 1
+        end
+      end
+    done;
+    ( if !is_good then !offset' else -1
+    , row
+    , col
+    )
+
+let is_sub_char : (char -> bool) -> int -> string -> int
+  fun predicate offset string ->
+    if String.length string <= offset then
+      -1
+    else if predicate (String.get string offset) then
+      if String.get string offset = '\n' then
+        -2
+      else
+        offset + 1
+    else
+      -1
+
+let find_sub_string : string -> int -> int -> int -> string -> int * int * int =
+  fun small_string offset row col big_string ->
+    TODO
+
 (* Parsers *)
 
 type 'context located =
@@ -269,9 +347,9 @@ let token : 'x token -> ('c, 'x, unit) t =
     in
     fun s ->
       let (new_offset, new_row, new_col) =
-        isSubString str s.offset s.row s.col s.src
+        is_sub_string str s.offset s.row s.col s.src
       in
-      if new_offset EQUALS -1 then
+      if new_offset = -1 then
         Bad (False, from_state s expecting)
       else
         Good
@@ -300,9 +378,15 @@ let keyword : 'x token -> ('c, 'x, unit) =
     in
     fun s ->
       let (new_offset, new_row, new_col) =
-        isSubString str s.offset s.row s.col s.src
+        is_sub_string str s.offset s.row s.col s.src
       in
-      if new_offset EQUALS -1 || 0 <= isSubChar (fun c -> Char.isAlphaNum c || c EQUALS '_') new_offset s.src then
+      if
+        new_offset = -1 ||
+        0 <= is_sub_char
+               (fun c -> is_alpha c || || is_num c || c = '_')
+               new_offset
+               s.src
+      then
         Bad (False, from_state s expecting)
       else
         Good
@@ -334,7 +418,7 @@ let float : 'x -> 'x -> ('c, 'x, float) t =
 let endd : 'x -> ('c, 'x, unit) =
   fun x ->
     fun s ->
-      if String.length s.src EQUALS s.offset then
+      if String.length s.src = s.offset then
         Good (false, (), s)
       else
         Bad (false, from_state s x)
@@ -362,12 +446,12 @@ let chomp_if : (char -> bool) -> 'x -> ('c, 'x, unit) t =
   fun is_good expecting ->
     fun s ->
       let new_offset =
-        isSubChar is_good s.offset s.src
+        is_sub_char is_good s.offset s.src
       in
-      if new_offset EQUALS -1 then
+      if new_offset = -1 then
         Bad (False, from_state s expecting)
 
-      else if new_offset EQUALS -2 then
+      else if new_offset = -2 then
         Good
           ( True
           , ()
@@ -404,7 +488,7 @@ let chomp_while_help :
     let new_offset =
       isSubChar is_good offset s0.src
     in
-    if new_offset EQUALS -1 then
+    if new_offset = -1 then
       Good
         ( s0.offset < offset
         , ()
@@ -417,7 +501,7 @@ let chomp_while_help :
           }
         )
 
-    else if new_offset EQUALS -2 then
+    else if new_offset = -2 then
       chomp_while_help is_good (offset + 1) (row + 1) 1 s0
 
     else
@@ -436,7 +520,7 @@ let chomp_until : 'x token -> ('c, 'x, unit) t =
       let (new_offset, new_row, new_col) =
         findSubString str s.offset s.row s.col s.src
       in
-      if new_offset EQUALS -1 then
+      if new_offset = -1 then
         Bad (False, from_info new_row new_col expecting s.context)
 
       else
@@ -565,9 +649,9 @@ let var_help :
   'c state =
     fun is_good offset row col src indent context =
       let new_offset =
-        isSubChar is_good offset src
+        is_sub_char is_good offset src
       in
-      if new_offset EQUALS -1 then
+      if new_offset = -1 then
         { src = src
         ; offset = offset
         ; indent = indent
@@ -576,7 +660,7 @@ let var_help :
         ; col = col
         }
 
-      else if new_offset EQUALS -2 then
+      else if new_offset = -2 then
         var_help is_good (offset + 1) (row + 1) 1 src indent context
 
       else
@@ -590,13 +674,13 @@ let variable
   : ('c, 'x, string) t =
     fun s ->
       let first_offset =
-        isSubChar start offset src
+        is_sub_char start offset src
       in
-      if first_offset EQUALS -1 then
+      if first_offset = -1 then
         Bad (false, from_State s expecting)
       else
         let s1 =
-          if first_offset EQUALS -2 then
+          if first_offset = -2 then
             var_help
               inner (s.offset + 1) (s.row + 1) s.src s.indent s.context
           else
@@ -718,7 +802,7 @@ let sequence
 (* Whitespace *)
 
 let spaces : ('c, 'x, unit) t =
-  chomp_while (fun c -> c EQUALS ' ' || c EQUALS '\n' || c EQUALS '\r')
+  chomp_while (fun c -> c = ' ' || c = '\n' || c = '\r')
 
 let line_comment : 'x token -> ('c, 'x, unit) t =
   fun start ->
@@ -747,7 +831,7 @@ let nestable_help :
   fun is_not_relevant openn close expecting_close nest_level =
     skip (chomp_while is_not_relevant) @@
       one_of
-        [ if nest_level EQUALS 1 then
+        [ if nest_level = 1 then
             close
           else
             close
