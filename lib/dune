@@ -2,9 +2,9 @@
   ( name
       bark
   )
-;;  ( public_name
-;;      bark
-;;  )
+  ( public_name
+      bark
+  )
   ( libraries
       str
   )
