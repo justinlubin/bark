@@ -55,12 +55,12 @@ let is_sub_string : string -> int -> int -> int -> string -> int * int * int =
         end
       end
     done;
-    ( if !is_good then !offset' else -1
-    , row
-    , col
+    ( (if !is_good then !offset' else -1)
+    , !row'
+    , !col'
     )
 
-let is_sub_char : (char -> bool) -> int -> string -> int
+let is_sub_char : (char -> bool) -> int -> string -> int =
   fun predicate offset string ->
     if String.length string <= offset then
       -1
@@ -74,7 +74,43 @@ let is_sub_char : (char -> bool) -> int -> string -> int
 
 let find_sub_string : string -> int -> int -> int -> string -> int * int * int =
   fun small_string offset row col big_string ->
-    TODO
+    let small_re =
+      Str.regexp_string small_string
+    in
+    let new_offset =
+      try
+        Str.search_forward small_re big_string offset
+      with
+        Not_found ->
+          -1
+    in
+    let target =
+      if new_offset < 0 then
+        String.length big_string
+      else
+        new_offset + String.length small_string
+    in
+    let (offset', row', col') =
+      (ref offset, ref row, ref col)
+    in
+    while (!offset' < target) do
+      offset' :=
+        !offset' + 1;
+      begin if String.get big_string !offset' = '\n' then
+        begin
+          row' := !row' + 1;
+          col' := 1
+        end
+      else
+        begin
+          col' := !col' + 1
+        end
+      end
+    done;
+    ( new_offset
+    , !row'
+    , !col'
+    )
 
 (* Parsers *)
 
@@ -93,23 +129,17 @@ type 'context state =
   ; col :int
   }
 
-type 'context context_stack_entry =
-  { row : int
-  ; col : int
-  ; context : 'context
-  }
-
 type ('context, 'problem) dead_end =
   { row : int
   ; col : int
-  , problem : 'problem
-  , context_stack : 'context located list
+  ; problem : 'problem
+  ; context_stack : 'context located list
   }
 
 type ('c, 'x) bag =
   | Empty
   | AddRight of ('c, 'x) bag * ('c, 'x) dead_end
-  | Append ('c, 'x) bag * ('c, 'x) bag
+  | Append of ('c, 'x) bag * ('c, 'x) bag
 
 type ('context, 'problem, 'value) pstep =
   | Good of bool * 'value * 'context state
@@ -117,26 +147,6 @@ type ('context, 'problem, 'value) pstep =
 
 type ('context, 'problem, 'value) t =
   'context state -> ('context, 'problem, 'value) pstep
-
-(* Run *)
-
-let run : ('c, 'x, 'a) -> string -> ('a, ('c, 'x) dead_end list) result =
-  fun parse src ->
-    match
-      parse
-        { src = src
-        ; offset = 0
-        ; indent = 1
-        ; context = []
-        ; row = 1
-        ; col = 1
-        }
-    with
-      Good (_, value _) ->
-        Ok value
-
-      Bad (_, bag) ->
-        Error (bag_to_list bag [])
 
 (* Problems *)
 
@@ -151,7 +161,7 @@ let from_state : 'c state -> 'x -> ('c, 'x) bag =
         }
       )
 
-let from_info : int -> int => 'x -> 'c located list -> ('c, 'x) bag =
+let from_info : int -> int -> 'x -> 'c located list -> ('c, 'x) bag =
   fun row col x context ->
     AddRight
       ( Empty
@@ -162,8 +172,8 @@ let from_info : int -> int => 'x -> 'c located list -> ('c, 'x) bag =
         }
       )
 
-let bag_to_list :
-  ('c, 'x) bag -> ('c, 'x) dead_end list -> ('c, x) dead_end list =
+let rec bag_to_list :
+  ('c, 'x) bag -> ('c, 'x) dead_end list -> ('c, 'x) dead_end list =
     fun bag ls ->
       match bag with
         | Empty ->
@@ -175,15 +185,35 @@ let bag_to_list :
         | Append (bag1, bag2) ->
             bag_to_list bag1 (bag_to_list bag2 ls)
 
+(* Run *)
+
+let run : ('c, 'x, 'a) t -> string -> ('a, ('c, 'x) dead_end list) result =
+  fun parse src ->
+    match
+      parse
+        { src = src
+        ; offset = 0
+        ; indent = 1
+        ; context = []
+        ; row = 1
+        ; col = 1
+        }
+    with
+      | Good (_, value, _) ->
+          Ok value
+
+      | Bad (_, bag) ->
+          Error (bag_to_list bag [])
+
 (* Primitives *)
 
 let succeed : 'a -> ('c, 'x, 'a) t =
   fun a ->
-    fun s -> Good False a s
+    fun s -> Good (false, a, s)
 
 let problem : 'x -> ('c, 'x, 'a) t =
   fun x ->
-    fun s -> Bad False (from_state s x)
+    fun s -> Bad (false, from_state s x)
 
 (* Mapping *)
 
@@ -215,6 +245,7 @@ let map2 :
 
               | Good (p2, b, s2) ->
                   Good (p1 || p2, func a b, s2)
+            end
 
 let keeper : ('c, 'x, 'a -> 'b) t -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t =
   fun parse_func parse_arg ->
@@ -227,7 +258,7 @@ let ignorer : ('c, 'x, 'keep) t -> ('c, 'x, 'ignore) t -> ('c, 'x, 'keep) t =
 (* And Then *)
 
 let and_then : ('a -> ('c, 'x, 'b) t) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t =
-  fun callback parse_a =
+  fun callback parse_a ->
     fun s0 ->
       match parse_a s0 with
         | Bad (p, x) ->
@@ -247,7 +278,7 @@ let and_then : ('a -> ('c, 'x, 'b) t) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t =
 
 (* Lazily *)
 
-let lazily : (unit -> ('c, 'x, 'a) t) -> ('c, 'x, 'a) =
+let lazily : (unit -> ('c, 'x, 'a) t) -> ('c, 'x, 'a) t =
   fun thunk ->
     fun s ->
       let parse =
@@ -257,7 +288,7 @@ let lazily : (unit -> ('c, 'x, 'a) t) -> ('c, 'x, 'a) =
 
 (* One Of *)
 
-let one_of_help :
+let rec one_of_help :
  'c state ->
  ('c, 'x) bag ->
  ('c, 'x, 'a) t list ->
@@ -290,12 +321,12 @@ type ('state, 'a) step =
   | Loop of 'state
   | Done of 'a
 
-let loop_help :
+let rec loop_help :
  bool ->
  'state ->
- ('state -> ('c, 'x, ('a, 'state) step) t) ->
+ ('state -> ('c, 'x, ('state, 'a) step) t) ->
  'c state ->
- ('c, 'x, 'a) pstep
+ ('c, 'x, 'a) pstep =
   fun p state callback s0 ->
     let parse =
       callback state
@@ -313,10 +344,13 @@ let loop_help :
       | Bad (p1, x) ->
           Bad (p || p1, x)
 
-let loop : 'state -> ('state -> ('c, 'x, ('state, 'a) step)) -> ('c, 'x, 'a) t =
+let loop :
+ 'state ->
+ ('state -> ('c, 'x, ('state, 'a) step) t) ->
+ ('c, 'x, 'a) t =
   fun state callback ->
     fun s ->
-      loop_help False state callback s
+      loop_help false state callback s
 
 (* Backtrackable *)
 
@@ -325,32 +359,32 @@ let backtrackable : ('c, 'x, 'a) t -> ('c, 'x, 'a) t =
     fun s0 ->
       match parse s0 with
         | Bad (_, x) ->
-            Bad (False, x)
+            Bad (false, x)
 
         | Good (_, a, s1) ->
-            Good (False, a, s1)
+            Good (false, a, s1)
 
 let commit : 'a -> ('c, 'x, 'a) t =
   fun a ->
     fun s ->
-      Good (True, a, s)
+      Good (true, a, s)
 
 (* Token *)
 
 type 'x token =
-  | Token of String * 'x
+  | Token of string * 'x
 
 let token : 'x token -> ('c, 'x, unit) t =
   fun (Token (str, expecting)) ->
     let progress =
-      not (String.is_empty str)
+      str <> ""
     in
     fun s ->
       let (new_offset, new_row, new_col) =
         is_sub_string str s.offset s.row s.col s.src
       in
       if new_offset = -1 then
-        Bad (False, from_state s expecting)
+        Bad (false, from_state s expecting)
       else
         Good
           ( progress
@@ -371,23 +405,23 @@ let symbol : 'x token -> ('c, 'x, unit) t =
 
 (* Keyword *)
 
-let keyword : 'x token -> ('c, 'x, unit) =
+let keyword : 'x token -> ('c, 'x, unit) t =
   fun (Token (kwd, expecting)) ->
     let progress =
-      not (String.is_empty kwd)
+      kwd <> ""
     in
     fun s ->
       let (new_offset, new_row, new_col) =
-        is_sub_string str s.offset s.row s.col s.src
+        is_sub_string kwd s.offset s.row s.col s.src
       in
       if
         new_offset = -1 ||
         0 <= is_sub_char
-               (fun c -> is_alpha c || || is_num c || c = '_')
+               (fun c -> is_alpha c || is_num c || c = '_')
                new_offset
                s.src
       then
-        Bad (False, from_state s expecting)
+        Bad (false, from_state s expecting)
       else
         Good
           ( progress
@@ -401,21 +435,9 @@ let keyword : 'x token -> ('c, 'x, unit) =
             }
           )
 
-(* Int *)
-
-let int : 'x -> 'x -> ('c, 'x, int) t =
-  fun expecting invalid ->
-    TODO
-
-(* Float *)
-
-let float : 'x -> 'x -> ('c, 'x, float) t =
-  fun expecting invalid ->
-    TODO
-
 (* End *)
 
-let endd : 'x -> ('c, 'x, unit) =
+let endd : 'x -> ('c, 'x, unit) t =
   fun x ->
     fun s ->
       if String.length s.src = s.offset then
@@ -425,8 +447,12 @@ let endd : 'x -> ('c, 'x, unit) =
 
 (* Chomped Strings *)
 
+let slice : int -> int -> string -> string =
+  fun lo hi s ->
+    String.sub s lo (hi - lo)
+
 let map_chomped_string :
- (string -> 'a -> 'b) -> ('c, 'x, 'a) t -> ('c, 'x, b) t =
+ (string -> 'a -> 'b) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t =
   fun func parse ->
     fun s0 ->
       match parse s0 with
@@ -434,10 +460,10 @@ let map_chomped_string :
             Bad (p, x)
 
         | Good (p, a, s1) ->
-            Good (p, func (String.slice s0,offset s1.offset s0.src), s1)
+            Good (p, func (slice s0.offset s1.offset s0.src) a, s1)
 
 let get_chomped_string : ('c, 'x, 'a) t -> ('c, 'x, string) t =
-  fun parse =
+  fun parse ->
     map_chomped_string (fun s _ -> s) parse
 
 (* Chomp If *)
@@ -449,11 +475,11 @@ let chomp_if : (char -> bool) -> 'x -> ('c, 'x, unit) t =
         is_sub_char is_good s.offset s.src
       in
       if new_offset = -1 then
-        Bad (False, from_state s expecting)
+        Bad (false, from_state s expecting)
 
       else if new_offset = -2 then
         Good
-          ( True
+          ( true
           , ()
           , { src = s.src
             ; offset = s.offset + 1
@@ -466,7 +492,7 @@ let chomp_if : (char -> bool) -> 'x -> ('c, 'x, unit) t =
 
       else
         Good
-          ( True
+          ( true
           , ()
           , { src = s.src
             ; offset = new_offset
@@ -479,14 +505,14 @@ let chomp_if : (char -> bool) -> 'x -> ('c, 'x, unit) t =
 
 (* Chomp While *)
 
-let chomp_while_help :
+let rec chomp_while_help :
  (char -> bool) ->
  int -> int -> int ->
  'c state ->
- ('c, 'x, unit t) =
-  fun is_good offset row col s0 =
+ ('c, 'x, unit) pstep =
+  fun is_good offset row col s0 ->
     let new_offset =
-      isSubChar is_good offset s0.src
+      is_sub_char is_good offset s0.src
     in
     if new_offset = -1 then
       Good
@@ -508,7 +534,7 @@ let chomp_while_help :
       chomp_while_help is_good new_offset row (col + 1) s0
 
 let chomp_while : (char -> bool) -> ('c, 'x, unit) t =
-  fun is_good =
+  fun is_good ->
     fun s ->
       chomp_while_help is_good s.offset s.row s.col s
 
@@ -518,10 +544,10 @@ let chomp_until : 'x token -> ('c, 'x, unit) t =
   fun (Token (str, expecting)) ->
     fun s ->
       let (new_offset, new_row, new_col) =
-        findSubString str s.offset s.row s.col s.src
+        find_sub_string str s.offset s.row s.col s.src
       in
       if new_offset = -1 then
-        Bad (False, from_info new_row new_col expecting s.context)
+        Bad (false, from_info new_row new_col expecting s.context)
 
       else
         Good
@@ -540,7 +566,7 @@ let chomp_until_end_or : string -> ('c, 'x, unit) t =
   fun str ->
     fun s ->
       let (new_offset, new_row, new_col) =
-        findSubString str s.offset s.row s.col s.src
+        find_sub_string str s.offset s.row s.col s.src
       in
       let adjusted_offset =
         if new_offset < 0 then
@@ -563,7 +589,7 @@ let chomp_until_end_or : string -> ('c, 'x, unit) t =
 (* Context *)
 
 let change_context : 'c located list -> 'c state -> 'c state =
-  fun new_context s =
+  fun new_context s ->
     { src = s.src
     ; offset = s.offset
     ; indent = s.indent
@@ -572,29 +598,30 @@ let change_context : 'c located list -> 'c state -> 'c state =
     ; col = s.col
     }
 
-let in_context : 'context -> ('context, 'x, 'a) -> ('context, 'x, 'a) t =
+let in_context : 'context -> ('context, 'x, 'a) t -> ('context, 'x, 'a) t =
   fun context parse ->
     fun s0 ->
       match
         parse @@
           change_context
-            { row = s0.row
-            ; col = s0.col
-            ; context = context :: s0.context
-            }
+            ( { row = s0.row
+              ; col = s0.col
+              ; context = context
+              } :: s0.context
+            )
             s0
       with
-        Good (p, a, s1) ->
-          Good (p, a, change_context s0.context s1)
+        | Good (p, a, s1) ->
+            Good (p, a, change_context s0.context s1)
 
-        Bad (_, _) as step ->
-          step
+        | Bad (_, _) as step ->
+            step
 
 (* Indentation *)
 
 let get_indent : ('c, 'x, int) t =
   fun s ->
-    Good (False, s.indent, s)
+    Good (false, s.indent, s)
 
 let change_indent : int -> 'c state -> 'c state =
   fun new_indent s ->
@@ -607,7 +634,7 @@ let change_indent : int -> 'c state -> 'c state =
     }
 
 let with_indent : int -> ('c, 'x, 'a) t -> ('c, 'x, 'a) t =
-  fun new_indent parse =
+  fun new_indent parse ->
     fun s0 ->
       match parse (change_indent new_indent s0) with
         | Good (p, a, s1) ->
@@ -620,34 +647,34 @@ let with_indent : int -> ('c, 'x, 'a) t -> ('c, 'x, 'a) t =
 
 let get_position : ('c, 'x, int * int) t =
   fun s ->
-    Good (False, (s.row, s.col), s)
+    Good (false, (s.row, s.col), s)
 
 let get_row : ('c, 'x, int) t =
   fun s ->
-    Good (False, s.row, s)
+    Good (false, s.row, s)
 
 let get_col : ('c, 'x, int) t =
   fun s ->
-    Good (False, s.col, s)
+    Good (false, s.col, s)
 
 let get_offset : ('c, 'x, int) t =
   fun s ->
-    Good (False, s.offset, s)
+    Good (false, s.offset, s)
 
 let get_source : ('c, 'x, string) t =
   fun s ->
-    Good (False, s.src, s)
+    Good (false, s.src, s)
 
 (* Variables *)
 
-let var_help :
+let rec var_help :
   (char -> bool) ->
   int -> int -> int ->
   string ->
   int ->
   'c located list ->
   'c state =
-    fun is_good offset row col src indent context =
+    fun is_good offset row col src indent context ->
       let new_offset =
         is_sub_char is_good offset src
       in
@@ -666,39 +693,37 @@ let var_help :
       else
         var_help is_good new_offset row (col + 1) src indent context
 
-let variable
-  ~start:(char -> bool)
-  ~inner:(char -> bool)
-  ~reserved:String_set.t
-  ~expecting:'x
-  : ('c, 'x, string) t =
-    fun s ->
-      let first_offset =
-        is_sub_char start offset src
-      in
-      if first_offset = -1 then
-        Bad (false, from_State s expecting)
-      else
-        let s1 =
-          if first_offset = -2 then
-            var_help
-              inner (s.offset + 1) (s.row + 1) s.src s.indent s.context
-          else
-            var_help
-              inner first_offset s.row (s.col + 1) s.src s.indent s.context
-        in
-        let name =
-          String.slice s.offset s1.offset s.src
-        in
-        if Set.member name reserved then
-          Bad False (from_state s i.expecting)
+module String_set =
+  Set.Make(String)
+
+let variable ~start ~inner ~reserved ~expecting =
+  fun s ->
+    let first_offset =
+      is_sub_char start s.offset s.src
+    in
+    if first_offset = -1 then
+      Bad (false, from_state s expecting)
+    else
+      let s1 =
+        if first_offset = -2 then
+          var_help
+            inner (s.offset + 1) (s.row + 1) 1 s.src s.indent s.context
         else
-          Good (True, name, s1)
+          var_help
+            inner first_offset s.row (s.col + 1) s.src s.indent s.context
+      in
+      let name =
+        slice s.offset s1.offset s.src
+      in
+      if String_set.mem name reserved then
+        Bad (false, from_state s expecting)
+      else
+        Good (true, name, s1)
 
 (* Sequences *)
 
-let skip : ('c, 'x, 'ignore) -> ('c, 'x, 'keep) -> ('c, 'x, 'keep) =
-  fun ignore_parser keep_parser =
+let skip : ('c, 'x, 'ignore) t -> ('c, 'x, 'keep) t -> ('c, 'x, 'keep) t =
+  fun ignore_parser keep_parser ->
     map2 (fun _ k -> k) ignore_parser keep_parser
 
 type trailing =
@@ -714,14 +739,11 @@ let sequence_end_forbidden :
  'a list ->
  ('c, 'x, ('a list, 'a list) step) t =
   fun ender ws parse_item sep rev_items ->
-    let chomp_rest item =
-      sequence_end_forbidden ender ws parse_item (item :: rev_items)
-    in
     skip ws @@
       one_of
         [ skip sep @@ skip ws @@
             map (fun item -> Loop (item :: rev_items)) parse_item
-        ; ender |> map (fun _ -> Done (List.reverse rev_items))
+        ; ender |> map (fun _ -> Done (List.rev rev_items))
         ]
 
 let sequence_end_optional :
@@ -733,7 +755,7 @@ let sequence_end_optional :
  ('c, 'x, ('a list, 'a list) step) t =
   fun ender ws parse_item sep rev_items ->
     let parse_end =
-      map (fun _ -> Done (List.reverse rev_items)) ender
+      map (fun _ -> Done (List.rev rev_items)) ender
     in
     skip ws @@
       one_of
@@ -755,7 +777,7 @@ let sequence_end_mandatory :
     one_of
       [ map (fun item -> Loop (item :: rev_items)) @@
           ignorer parse_item (ignorer ws (ignorer sep ws))
-      ; map (fun _ -> Done (List.reverse rev_items)) (succeed ())
+      ; map (fun _ -> Done (List.rev rev_items)) (succeed ())
       ]
 
 
@@ -787,48 +809,29 @@ let sequence_end :
         ; ender |> map (fun _ -> [])
         ]
 
-let sequence
-  ~start:('x token)
-  ~separator:('x token)
-  ~endd:('x token)
-  ~spaces:(('c, 'x, unit) t)
-  ~item:(('c, 'x, 'a) t)
-  ~trailing:trailing
-  : ('c, 'x, 'a list) t =
-    skip (token start) @@
-    skip spaces @@
-      sequence_end (token endd) spaces item (token separator) trailing
+let sequence ~start ~separator ~endd ~spaces ~item ~trailing =
+  skip (token start) @@
+  skip spaces @@
+    sequence_end (token endd) spaces item (token separator) trailing
 
 (* Whitespace *)
 
 let spaces : ('c, 'x, unit) t =
-  chomp_while (fun c -> c = ' ' || c = '\n' || c = '\r')
+  fun s ->
+    chomp_while (fun c -> c = ' ' || c = '\n' || c = '\r') s
 
 let line_comment : 'x token -> ('c, 'x, unit) t =
   fun start ->
     ignorer (token start) (chomp_until_end_or "\n")
 
-type nestable =
-  | NotNestable
-  | Nestable
-
-let multi_comment : 'x token -> 'x token -> nestable -> ('c, 'x, unit) t =
-  fun openn close nestable ->
-    match nestable with
-      | NotNestable ->
-          ignorer (token openn) (chomp_until close)
-
-      | Nestable ->
-          nestable_comment openn close
-
-let nestable_help :
+let rec nestable_help :
  (char -> bool) ->
  ('c, 'x, unit) t ->
  ('c, 'x, unit) t ->
  'x ->
  int ->
- ('c, 'x, unit) ->
-  fun is_not_relevant openn close expecting_close nest_level =
+ ('c, 'x, unit) t =
+  fun is_not_relevant openn close expecting_close nest_level ->
     skip (chomp_while is_not_relevant) @@
       one_of
         [ if nest_level = 1 then
@@ -866,20 +869,30 @@ let nestable_help :
                  )
         ]
 
+let uncons : string -> (char * string) option =
+  fun s ->
+    let len =
+      String.length s
+    in
+    if len = 0 then
+      None
+    else
+      Some (String.get s 0, String.sub s 1 len)
+
 let nestable_comment : 'x token -> 'x token -> ('c, 'x, unit) t =
   fun (Token (o_str, o_x) as openn) (Token (c_str, c_x) as close) ->
-    match String.uncons o_str with
+    match uncons o_str with
       | None ->
           problem o_x
 
       | Some (open_char, _) ->
-          begin match String.uncons c_str with
+          begin match uncons c_str with
             | None ->
-              problem c_x
+                problem c_x
 
-            | Some (closeChar, _) ->
+            | Some (close_char, _) ->
                 let is_not_relevant c =
-                  c NOT EQUAL open_char && c NOT EQUAL close_char
+                  c <> open_char && c <> close_char
                 in
                 let chomp_open =
                   token openn
@@ -888,3 +901,61 @@ let nestable_comment : 'x token -> 'x token -> ('c, 'x, unit) t =
                   chomp_open
                   (nestable_help is_not_relevant chomp_open (token close) c_x 1)
           end
+
+type nestable =
+  | NotNestable
+  | Nestable
+
+let multi_comment : 'x token -> 'x token -> nestable -> ('c, 'x, unit) t =
+  fun openn close nestable ->
+    match nestable with
+      | NotNestable ->
+          ignorer (token openn) (chomp_until close)
+
+      | Nestable ->
+          nestable_comment openn close
+
+(* Syntax *)
+
+module Syntax = struct
+  let ( let+ ) p f = map f p
+  let ( let* ) p f = p |> and_then f
+end
+
+let (|=) = keeper
+let (|.) = ignorer
+
+(* Int *)
+
+let int : 'x -> ('c, 'x, int) t =
+  fun expecting ->
+    let open Syntax in
+    let* s =
+      get_chomped_string (chomp_while is_num)
+    in
+    if s = "" then
+      problem expecting
+    else
+      succeed (int_of_string s)
+
+(* Float *)
+
+let float : 'x -> 'x -> ('c, 'x, float) t =
+  fun expecting invalid ->
+    let open Syntax in
+    let* s1 =
+      get_chomped_string (chomp_while is_num)
+    in
+    if s1 = "" then
+      problem expecting
+    else
+      let* _ =
+        symbol (Token (".", invalid))
+      in
+      let* s2 =
+        get_chomped_string (chomp_while is_num)
+      in
+      if s2 = "" then
+        problem invalid
+      else
+        succeed (float_of_string @@ s1 ^ "." ^ s2)

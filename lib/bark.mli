@@ -4,26 +4,27 @@ type ('context, 'problem, 'value) t
 
 type ('context, 'problem) dead_end
 
-val run : ('c, 'x, 'a) t -> string -> ('a, ('c, 'x) dead_end list)
+val run : ('c, 'x, 'a) t -> string -> ('a, ('c, 'x) dead_end list) result
 
 val in_context : 'context -> ('context, 'x, 'a) t -> ('context, 'x, 'a) t
 
 type 'x token =
-  | Token of String * 'x
+  | Token of string * 'x
 
 (* Building blocks *)
 
 val is_alpha : char -> bool
 val is_num : char -> bool
 
-val int : 'x -> 'x -> ('c, 'x, int) t
+val int : 'x -> ('c, 'x, int) t
 val float : 'x -> 'x -> ('c, 'x, float) t
 
 val symbol : 'x token -> ('c, 'x, unit) t
 val keyword : 'x token -> ('c, 'x, unit) t
 
-module type String_set =
-  Set.S with type elt = string
+module String_set : sig
+  include Set.S with type elt = string
+end
 
 val variable :
   start:(char -> bool) ->
@@ -43,7 +44,7 @@ val (|.) : ('c, 'x, 'keep) t -> ('c, 'x, 'ignore) t -> ('c, 'x, 'keep) t
 
 val lazily : (unit -> ('c, 'x, 'a) t) -> ('c, 'x, 'a) t
 
-val andThen : ('a -> ('c, 'x, 'b)) t -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t
+val and_then : ('a -> ('c, 'x, 'b) t) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t
 
 val problem : 'x -> ('c, 'x, 'a) t
 
@@ -78,7 +79,7 @@ type ('state, 'a) step =
   | Loop of 'state
   | Done of 'a
 
-val loop : 'state -> ('state -> ('c, 'x, ('state, 'a) step) -> ('c, 'x, 'a) t
+val loop : 'state -> ('state -> ('c, 'x, ('state, 'a) step) t) -> ('c, 'x, 'a) t
 
 (* Whitespace *)
 
@@ -116,4 +117,11 @@ val get_position : ('c, 'x, int * int) t
 val get_row : ('c, 'x, int) t
 val get_col : ('c, 'x, int) t
 val get_offset : ('c, 'x, int) t
-val get_source : ('c, 'x, int) t
+val get_source : ('c, 'x, string) t
+
+(* Syntax *)
+
+module Syntax : sig
+  val ( let+ ) : ('c, 'x, 'a) t -> ('a -> 'b) -> ('c, 'x, 'b) t
+  val ( let* ) : ('c, 'x, 'a) t -> ('a -> ('c, 'x, 'b) t) -> ('c, 'x, 'b) t
+end
