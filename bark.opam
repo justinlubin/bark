@@ -7,7 +7,7 @@ This is an unofficial OCaml port of the elm/parser library (version 1.1.0) by
 Evan Czaplicki.This port is extremely faithful and copies the original almost
 line-for-line.
 """
-doc: "https://package.elm-lang.org/packages/elm/parser/1.1.0/"
+doc: "https://justinlubin.github.io/bark"
 maintainer: "Justin Lubin <jlubi333@gmail.com>"
 authors: "Justin Lubin <jlubi333@gmail.com>"
 license: "BSD 3-Clause"
