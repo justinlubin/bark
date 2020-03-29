@@ -1,6 +1,6 @@
 ( executable
   ( name
-      example1
+      examples
   )
   ( libraries
       bark

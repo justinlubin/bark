@@ -1,12 +1,29 @@
 (* Parsers *)
 
-type ('context, 'problem, 'value) t
+type ('context, 'problem, 'value) parser
 
-type ('context, 'problem) dead_end
+type 'context located =
+  { row : int
+  ; col : int
+  ; context : 'context
+  }
 
-val run : ('c, 'x, 'a) t -> string -> ('a, ('c, 'x) dead_end list) result
+type ('context, 'problem) dead_end =
+  { row : int
+  ; col : int
+  ; problem : 'problem
+  ; context_stack : 'context located list
+  }
 
-val in_context : 'context -> ('context, 'x, 'a) t -> ('context, 'x, 'a) t
+val run :
+  ('c, 'x, 'a) parser ->
+  string ->
+  ('a, ('c, 'x) dead_end list) result
+
+val in_context :
+  'context ->
+  ('context, 'x, 'a) parser ->
+  ('context, 'x, 'a) parser
 
 type 'x token =
   | Token of string * 'x
@@ -16,11 +33,11 @@ type 'x token =
 val is_alpha : char -> bool
 val is_num : char -> bool
 
-val int : 'x -> ('c, 'x, int) t
-val float : 'x -> 'x -> ('c, 'x, float) t
+val int : 'x -> ('c, 'x, int) parser
+val float : 'x -> 'x -> ('c, 'x, float) parser
 
-val symbol : 'x token -> ('c, 'x, unit) t
-val keyword : 'x token -> ('c, 'x, unit) t
+val symbol : 'x token -> ('c, 'x, unit) parser
+val keyword : 'x token -> ('c, 'x, unit) parser
 
 module String_set : sig
   include Set.S with type elt = string
@@ -31,33 +48,43 @@ val variable :
   inner:(char -> bool) ->
   reserved:String_set.t ->
   expecting:'x ->
-    ('c, 'x, string) t
+  ('c, 'x, string) parser
 
-val endd : 'x -> ('c, 'x, unit) t
+val endd : 'x -> ('c, 'x, unit) parser
 
 (* Pipelines *)
 
-val succeed : 'a -> ('c, 'x, 'a) t
+val succeed : 'a -> ('c, 'x, 'a) parser
 
-val (|=) : ('c, 'x, 'a -> 'b) t -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t
-val (|.) : ('c, 'x, 'keep) t -> ('c, 'x, 'ignore) t -> ('c, 'x, 'keep) t
+val (|=) :
+  ('c, 'x, 'a -> 'b) parser ->
+  ('c, 'x, 'a) parser ->
+  ('c, 'x, 'b) parser
 
-val lazily : (unit -> ('c, 'x, 'a) t) -> ('c, 'x, 'a) t
+val (|.) :
+  ('c, 'x, 'keep) parser ->
+  ('c, 'x, 'ignore) parser ->
+  ('c, 'x, 'keep) parser
 
-val and_then : ('a -> ('c, 'x, 'b) t) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t
+val lazily : (unit -> ('c, 'x, 'a) parser) -> ('c, 'x, 'a) parser
 
-val problem : 'x -> ('c, 'x, 'a) t
+val and_then :
+  ('a -> ('c, 'x, 'b) parser) ->
+  ('c, 'x, 'a) parser ->
+  ('c, 'x, 'b) parser
+
+val problem : 'x -> ('c, 'x, 'a) parser
 
 (* Branches *)
 
-val one_of : ('c, 'x, 'a) t list -> ('c, 'x, 'a) t
+val one_of : ('c, 'x, 'a) parser list -> ('c, 'x, 'a) parser
 
-val map : ('a -> 'b) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t
+val map : ('a -> 'b) -> ('c, 'x, 'a) parser -> ('c, 'x, 'b) parser
 
-val backtrackable : ('c, 'x, 'a) t -> ('c, 'x, 'a) t
-val commit : 'a -> ('c, 'x, 'a) t
+val backtrackable : ('c, 'x, 'a) parser -> ('c, 'x, 'a) parser
+val commit : 'a -> ('c, 'x, 'a) parser
 
-val token : 'x token -> ('c, 'x, unit) t
+val token : 'x token -> ('c, 'x, unit) parser
 
 (* Loops *)
 
@@ -70,58 +97,75 @@ val sequence :
   start:('x token) ->
   separator:('x token) ->
   endd:('x token) ->
-  spaces:(('c, 'x, unit) t) ->
-  item:(('c, 'x, 'a) t) ->
+  spaces:(('c, 'x, unit) parser) ->
+  item:(('c, 'x, 'a) parser) ->
   trailing:trailing ->
-    ('c, 'x, 'a list) t
+    ('c, 'x, 'a list) parser
 
 type ('state, 'a) step =
   | Loop of 'state
   | Done of 'a
 
-val loop : 'state -> ('state -> ('c, 'x, ('state, 'a) step) t) -> ('c, 'x, 'a) t
+val loop :
+  'state ->
+  ('state -> ('c, 'x, ('state, 'a) step) parser) ->
+  ('c, 'x, 'a) parser
 
 (* Whitespace *)
 
-val spaces : ('c, 'x, unit) t
+val spaces : ('c, 'x, unit) parser
 
-val line_comment : 'x token -> ('c, 'x, unit) t
+val line_comment : 'x token -> ('c, 'x, unit) parser
 
 type nestable =
   | NotNestable
   | Nestable
 
-val multi_comment : 'x token -> 'x token -> nestable -> ('c, 'x, unit) t
+val multi_comment : 'x token -> 'x token -> nestable -> ('c, 'x, unit) parser
 
 (* Chompers *)
 
-val get_chomped_string : ('c, 'x, 'a) t -> ('c, 'x, string) t
+val get_chomped_string : ('c, 'x, 'a) parser -> ('c, 'x, string) parser
 
-val chomp_if : (char -> bool) -> 'x -> ('c, 'x, unit) t
-val chomp_while : (char -> bool) -> ('c, 'x, unit) t
-val chomp_until : 'x token -> ('c, 'x, unit) t
-val chomp_until_end_or : string -> ('c, 'x, unit) t
+val chomp_if : (char -> bool) -> 'x -> ('c, 'x, unit) parser
+val chomp_while : (char -> bool) -> ('c, 'x, unit) parser
+val chomp_until : 'x token -> ('c, 'x, unit) parser
+val chomp_until_end_or : string -> ('c, 'x, unit) parser
 
 val map_chomped_string :
-  (string -> 'a -> 'b) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t
+  (string -> 'a -> 'b) -> ('c, 'x, 'a) parser -> ('c, 'x, 'b) parser
 
-val with_indent : int -> ('c, 'x, 'a) t -> ('c, 'x, 'a) t
+val with_indent : int -> ('c, 'x, 'a) parser -> ('c, 'x, 'a) parser
 
 (* Indentation *)
 
-val get_indent : ('c, 'x, int) t
-val get_position : ('c, 'x, int * int) t
+val get_indent : ('c, 'x, int) parser
+val get_position : ('c, 'x, int * int) parser
 
 (* Positions *)
 
-val get_row : ('c, 'x, int) t
-val get_col : ('c, 'x, int) t
-val get_offset : ('c, 'x, int) t
-val get_source : ('c, 'x, string) t
+val get_row : ('c, 'x, int) parser
+val get_col : ('c, 'x, int) parser
+val get_offset : ('c, 'x, int) parser
+val get_source : ('c, 'x, string) parser
 
 (* Syntax *)
 
 module Syntax : sig
-  val ( let+ ) : ('c, 'x, 'a) t -> ('a -> 'b) -> ('c, 'x, 'b) t
-  val ( let* ) : ('c, 'x, 'a) t -> ('a -> ('c, 'x, 'b) t) -> ('c, 'x, 'b) t
+  val ( let+ ) :
+    ('c, 'x, 'a) parser ->
+    ('a -> 'b) ->
+    ('c, 'x, 'b) parser
+  val ( and+ ) :
+    ('c, 'x, 'a) parser ->
+    ('c, 'x, 'b) parser ->
+    ('c, 'x, 'a * 'b) parser
+  val ( and* ) :
+    ('c, 'x, 'a) parser ->
+    ('c, 'x, 'b) parser ->
+    ('c, 'x, 'a * 'b) parser
+  val ( let* ) :
+    ('c, 'x, 'a) parser ->
+    ('a -> ('c, 'x, 'b) parser) ->
+    ('c, 'x, 'b) parser
 end

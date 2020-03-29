@@ -161,7 +161,7 @@ type ('context, 'problem, 'value) pstep =
   | Good of bool * 'value * 'context state
   | Bad of bool * ('context, 'problem) bag
 
-type ('context, 'problem, 'value) t =
+type ('context, 'problem, 'value) parser =
   'context state -> ('context, 'problem, 'value) pstep
 
 (* Problems *)
@@ -203,7 +203,7 @@ let rec bag_to_list :
 
 (* Run *)
 
-let run : ('c, 'x, 'a) t -> string -> ('a, ('c, 'x) dead_end list) result =
+let run : ('c, 'x, 'a) parser -> string -> ('a, ('c, 'x) dead_end list) result =
   fun parse src ->
     match
       parse
@@ -223,17 +223,17 @@ let run : ('c, 'x, 'a) t -> string -> ('a, ('c, 'x) dead_end list) result =
 
 (* Primitives *)
 
-let succeed : 'a -> ('c, 'x, 'a) t =
+let succeed : 'a -> ('c, 'x, 'a) parser =
   fun a ->
     fun s -> Good (false, a, s)
 
-let problem : 'x -> ('c, 'x, 'a) t =
+let problem : 'x -> ('c, 'x, 'a) parser =
   fun x ->
     fun s -> Bad (false, from_state s x)
 
 (* Mapping *)
 
-let map : ('a -> 'b) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t =
+let map : ('a -> 'b) -> ('c, 'x, 'a) parser -> ('c, 'x, 'b) parser =
   fun func parse ->
     fun s0 ->
       match parse s0 with
@@ -245,9 +245,9 @@ let map : ('a -> 'b) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t =
 
 let map2 :
  ('a -> 'b -> 'value) ->
- ('c, 'x, 'a) t ->
- ('c, 'x, 'b) t ->
- ('c, 'x, 'value) t =
+ ('c, 'x, 'a) parser ->
+ ('c, 'x, 'b) parser ->
+ ('c, 'x, 'value) parser =
   fun func parse_a parse_b ->
     fun s0 ->
       match parse_a s0 with
@@ -263,17 +263,26 @@ let map2 :
                   Good (p1 || p2, func a b, s2)
             end
 
-let keeper : ('c, 'x, 'a -> 'b) t -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t =
+let keeper :
+ ('c, 'x, 'a -> 'b) parser ->
+ ('c, 'x, 'a) parser ->
+ ('c, 'x, 'b) parser =
   fun parse_func parse_arg ->
     map2 (@@) parse_func parse_arg
 
-let ignorer : ('c, 'x, 'keep) t -> ('c, 'x, 'ignore) t -> ('c, 'x, 'keep) t =
+let ignorer :
+ ('c, 'x, 'keep) parser ->
+ ('c, 'x, 'ignore) parser ->
+ ('c, 'x, 'keep) parser =
   fun keep_parser ignore_parser ->
     map2 (fun k _ -> k) keep_parser ignore_parser
 
 (* And Then *)
 
-let and_then : ('a -> ('c, 'x, 'b) t) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t =
+let and_then :
+ ('a -> ('c, 'x, 'b) parser) ->
+ ('c, 'x, 'a) parser ->
+ ('c, 'x, 'b) parser =
   fun callback parse_a ->
     fun s0 ->
       match parse_a s0 with
@@ -294,7 +303,7 @@ let and_then : ('a -> ('c, 'x, 'b) t) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t =
 
 (* Lazily *)
 
-let lazily : (unit -> ('c, 'x, 'a) t) -> ('c, 'x, 'a) t =
+let lazily : (unit -> ('c, 'x, 'a) parser) -> ('c, 'x, 'a) parser =
   fun thunk ->
     fun s ->
       let parse =
@@ -307,7 +316,7 @@ let lazily : (unit -> ('c, 'x, 'a) t) -> ('c, 'x, 'a) t =
 let rec one_of_help :
  'c state ->
  ('c, 'x) bag ->
- ('c, 'x, 'a) t list ->
+ ('c, 'x, 'a) parser list ->
  ('c, 'x, 'a) pstep =
   fun s0 bag parsers ->
     match parsers with
@@ -326,7 +335,7 @@ let rec one_of_help :
                   one_of_help s0 (Append (bag, x)) remaining_parsers
           end
 
-let one_of : ('c, 'x, 'a) t list -> ('c, 'x, 'a) t =
+let one_of : ('c, 'x, 'a) parser list -> ('c, 'x, 'a) parser =
   fun parsers ->
     fun s ->
       one_of_help s Empty parsers
@@ -340,7 +349,7 @@ type ('state, 'a) step =
 let rec loop_help :
  bool ->
  'state ->
- ('state -> ('c, 'x, ('state, 'a) step) t) ->
+ ('state -> ('c, 'x, ('state, 'a) step) parser) ->
  'c state ->
  ('c, 'x, 'a) pstep =
   fun p state callback s0 ->
@@ -362,15 +371,15 @@ let rec loop_help :
 
 let loop :
  'state ->
- ('state -> ('c, 'x, ('state, 'a) step) t) ->
- ('c, 'x, 'a) t =
+ ('state -> ('c, 'x, ('state, 'a) step) parser) ->
+ ('c, 'x, 'a) parser =
   fun state callback ->
     fun s ->
       loop_help false state callback s
 
 (* Backtrackable *)
 
-let backtrackable : ('c, 'x, 'a) t -> ('c, 'x, 'a) t =
+let backtrackable : ('c, 'x, 'a) parser -> ('c, 'x, 'a) parser =
   fun parse ->
     fun s0 ->
       match parse s0 with
@@ -380,7 +389,7 @@ let backtrackable : ('c, 'x, 'a) t -> ('c, 'x, 'a) t =
         | Good (_, a, s1) ->
             Good (false, a, s1)
 
-let commit : 'a -> ('c, 'x, 'a) t =
+let commit : 'a -> ('c, 'x, 'a) parser =
   fun a ->
     fun s ->
       Good (true, a, s)
@@ -390,7 +399,7 @@ let commit : 'a -> ('c, 'x, 'a) t =
 type 'x token =
   | Token of string * 'x
 
-let token : 'x token -> ('c, 'x, unit) t =
+let token : 'x token -> ('c, 'x, unit) parser =
   fun (Token (str, expecting)) ->
     let progress =
       str <> ""
@@ -416,12 +425,12 @@ let token : 'x token -> ('c, 'x, unit) t =
 
 (* Symbol *)
 
-let symbol : 'x token -> ('c, 'x, unit) t =
+let symbol : 'x token -> ('c, 'x, unit) parser =
   token
 
 (* Keyword *)
 
-let keyword : 'x token -> ('c, 'x, unit) t =
+let keyword : 'x token -> ('c, 'x, unit) parser =
   fun (Token (kwd, expecting)) ->
     let progress =
       kwd <> ""
@@ -453,7 +462,7 @@ let keyword : 'x token -> ('c, 'x, unit) t =
 
 (* End *)
 
-let endd : 'x -> ('c, 'x, unit) t =
+let endd : 'x -> ('c, 'x, unit) parser =
   fun x ->
     fun s ->
       if String.length s.src = s.offset then
@@ -464,7 +473,7 @@ let endd : 'x -> ('c, 'x, unit) t =
 (* Chomped Strings *)
 
 let map_chomped_string :
- (string -> 'a -> 'b) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t =
+ (string -> 'a -> 'b) -> ('c, 'x, 'a) parser -> ('c, 'x, 'b) parser =
   fun func parse ->
     fun s0 ->
       match parse s0 with
@@ -474,13 +483,13 @@ let map_chomped_string :
         | Good (p, a, s1) ->
             Good (p, func (slice s0.offset s1.offset s0.src) a, s1)
 
-let get_chomped_string : ('c, 'x, 'a) t -> ('c, 'x, string) t =
+let get_chomped_string : ('c, 'x, 'a) parser -> ('c, 'x, string) parser =
   fun parse ->
     map_chomped_string (fun s _ -> s) parse
 
 (* Chomp If *)
 
-let chomp_if : (char -> bool) -> 'x -> ('c, 'x, unit) t =
+let chomp_if : (char -> bool) -> 'x -> ('c, 'x, unit) parser =
   fun is_good expecting ->
     fun s ->
       let new_offset =
@@ -545,14 +554,14 @@ let rec chomp_while_help :
     else
       chomp_while_help is_good new_offset row (col + 1) s0
 
-let chomp_while : (char -> bool) -> ('c, 'x, unit) t =
+let chomp_while : (char -> bool) -> ('c, 'x, unit) parser =
   fun is_good ->
     fun s ->
       chomp_while_help is_good s.offset s.row s.col s
 
 (* Chomp Until *)
 
-let chomp_until : 'x token -> ('c, 'x, unit) t =
+let chomp_until : 'x token -> ('c, 'x, unit) parser =
   fun (Token (str, expecting)) ->
     fun s ->
       let (new_offset, new_row, new_col) =
@@ -574,7 +583,7 @@ let chomp_until : 'x token -> ('c, 'x, unit) t =
             }
           )
 
-let chomp_until_end_or : string -> ('c, 'x, unit) t =
+let chomp_until_end_or : string -> ('c, 'x, unit) parser =
   fun str ->
     fun s ->
       let (new_offset, new_row, new_col) =
@@ -610,7 +619,10 @@ let change_context : 'c located list -> 'c state -> 'c state =
     ; col = s.col
     }
 
-let in_context : 'context -> ('context, 'x, 'a) t -> ('context, 'x, 'a) t =
+let in_context :
+ 'context ->
+ ('context, 'x, 'a) parser ->
+ ('context, 'x, 'a) parser =
   fun context parse ->
     fun s0 ->
       match
@@ -631,7 +643,7 @@ let in_context : 'context -> ('context, 'x, 'a) t -> ('context, 'x, 'a) t =
 
 (* Indentation *)
 
-let get_indent : ('c, 'x, int) t =
+let get_indent : ('c, 'x, int) parser =
   fun s ->
     Good (false, s.indent, s)
 
@@ -645,7 +657,7 @@ let change_indent : int -> 'c state -> 'c state =
     ; col = s.col
     }
 
-let with_indent : int -> ('c, 'x, 'a) t -> ('c, 'x, 'a) t =
+let with_indent : int -> ('c, 'x, 'a) parser -> ('c, 'x, 'a) parser =
   fun new_indent parse ->
     fun s0 ->
       match parse (change_indent new_indent s0) with
@@ -657,23 +669,23 @@ let with_indent : int -> ('c, 'x, 'a) t -> ('c, 'x, 'a) t =
 
 (* Position *)
 
-let get_position : ('c, 'x, int * int) t =
+let get_position : ('c, 'x, int * int) parser =
   fun s ->
     Good (false, (s.row, s.col), s)
 
-let get_row : ('c, 'x, int) t =
+let get_row : ('c, 'x, int) parser =
   fun s ->
     Good (false, s.row, s)
 
-let get_col : ('c, 'x, int) t =
+let get_col : ('c, 'x, int) parser =
   fun s ->
     Good (false, s.col, s)
 
-let get_offset : ('c, 'x, int) t =
+let get_offset : ('c, 'x, int) parser =
   fun s ->
     Good (false, s.offset, s)
 
-let get_source : ('c, 'x, string) t =
+let get_source : ('c, 'x, string) parser =
   fun s ->
     Good (false, s.src, s)
 
@@ -734,7 +746,10 @@ let variable ~start ~inner ~reserved ~expecting =
 
 (* Sequences *)
 
-let skip : ('c, 'x, 'ignore) t -> ('c, 'x, 'keep) t -> ('c, 'x, 'keep) t =
+let skip :
+ ('c, 'x, 'ignore) parser ->
+ ('c, 'x, 'keep) parser ->
+ ('c, 'x, 'keep) parser =
   fun ignore_parser keep_parser ->
     map2 (fun _ k -> k) ignore_parser keep_parser
 
@@ -744,12 +759,12 @@ type trailing =
   | Mandatory
 
 let sequence_end_forbidden :
- ('c, 'x, unit) t ->
- ('c, 'x, unit) t ->
- ('c, 'x, 'a) t ->
- ('c, 'x, unit) t ->
+ ('c, 'x, unit) parser ->
+ ('c, 'x, unit) parser ->
+ ('c, 'x, 'a) parser ->
+ ('c, 'x, unit) parser ->
  'a list ->
- ('c, 'x, ('a list, 'a list) step) t =
+ ('c, 'x, ('a list, 'a list) step) parser =
   fun ender ws parse_item sep rev_items ->
     skip ws @@
       one_of
@@ -759,12 +774,12 @@ let sequence_end_forbidden :
         ]
 
 let sequence_end_optional :
- ('c, 'x, unit) t ->
- ('c, 'x, unit) t ->
- ('c, 'x, 'a) t ->
- ('c, 'x, unit) t ->
+ ('c, 'x, unit) parser ->
+ ('c, 'x, unit) parser ->
+ ('c, 'x, 'a) parser ->
+ ('c, 'x, unit) parser ->
  'a list ->
- ('c, 'x, ('a list, 'a list) step) t =
+ ('c, 'x, ('a list, 'a list) step) parser =
   fun ender ws parse_item sep rev_items ->
     let parse_end =
       map (fun _ -> Done (List.rev rev_items)) ender
@@ -780,11 +795,11 @@ let sequence_end_optional :
         ]
 
 let sequence_end_mandatory :
- ('c, 'x, unit) t ->
- ('c, 'x, 'a) t ->
- ('c, 'x, unit) t ->
+ ('c, 'x, unit) parser ->
+ ('c, 'x, 'a) parser ->
+ ('c, 'x, unit) parser ->
  'a list ->
- ('c, 'x, ('a list, 'a list) step) t =
+ ('c, 'x, ('a list, 'a list) step) parser =
   fun ws parse_item sep rev_items ->
     one_of
       [ map (fun item -> Loop (item :: rev_items)) @@
@@ -794,12 +809,12 @@ let sequence_end_mandatory :
 
 
 let sequence_end :
- ('c, 'x, unit) t ->
- ('c, 'x, unit) t ->
- ('c, 'x, 'a) t ->
- ('c, 'x, unit) t ->
+ ('c, 'x, unit) parser ->
+ ('c, 'x, unit) parser ->
+ ('c, 'x, 'a) parser ->
+ ('c, 'x, unit) parser ->
  trailing ->
- ('c, 'x, 'a list) t =
+ ('c, 'x, 'a list) parser =
   fun ender ws parse_item sep trailing ->
     let chomp_rest item =
       match trailing with
@@ -828,21 +843,21 @@ let sequence ~start ~separator ~endd ~spaces ~item ~trailing =
 
 (* Whitespace *)
 
-let spaces : ('c, 'x, unit) t =
+let spaces : ('c, 'x, unit) parser =
   fun s ->
     chomp_while (fun c -> c = ' ' || c = '\n' || c = '\r') s
 
-let line_comment : 'x token -> ('c, 'x, unit) t =
+let line_comment : 'x token -> ('c, 'x, unit) parser =
   fun start ->
     ignorer (token start) (chomp_until_end_or "\n")
 
 let rec nestable_help :
  (char -> bool) ->
- ('c, 'x, unit) t ->
- ('c, 'x, unit) t ->
+ ('c, 'x, unit) parser ->
+ ('c, 'x, unit) parser ->
  'x ->
  int ->
- ('c, 'x, unit) t =
+ ('c, 'x, unit) parser =
   fun is_not_relevant openn close expecting_close nest_level ->
     skip (chomp_while is_not_relevant) @@
       one_of
@@ -881,7 +896,7 @@ let rec nestable_help :
                  )
         ]
 
-let nestable_comment : 'x token -> 'x token -> ('c, 'x, unit) t =
+let nestable_comment : 'x token -> 'x token -> ('c, 'x, unit) parser =
   fun (Token (o_str, o_x) as openn) (Token (c_str, c_x) as close) ->
     match uncons o_str with
       | None ->
@@ -908,7 +923,7 @@ type nestable =
   | NotNestable
   | Nestable
 
-let multi_comment : 'x token -> 'x token -> nestable -> ('c, 'x, unit) t =
+let multi_comment : 'x token -> 'x token -> nestable -> ('c, 'x, unit) parser =
   fun openn close nestable ->
     match nestable with
       | NotNestable ->
@@ -920,8 +935,17 @@ let multi_comment : 'x token -> 'x token -> nestable -> ('c, 'x, unit) t =
 (* Syntax *)
 
 module Syntax = struct
-  let ( let+ ) p f = map f p
-  let ( let* ) p f = p |> and_then f
+  let ( let+ ) p f =
+    map f p
+
+  let ( and+ ) pa pb =
+    map2 (fun x y -> (x, y)) pa pb
+
+  let ( and* ) pa pb =
+    ( and+ ) pa pb
+
+  let ( let* ) p f =
+    p |> and_then f
 end
 
 let (|=) = keeper
@@ -929,7 +953,7 @@ let (|.) = ignorer
 
 (* Int *)
 
-let int : 'x -> ('c, 'x, int) t =
+let int : 'x -> ('c, 'x, int) parser =
   fun expecting ->
     let open Syntax in
     let* s =
@@ -942,7 +966,7 @@ let int : 'x -> ('c, 'x, int) t =
 
 (* Float *)
 
-let float : 'x -> 'x -> ('c, 'x, float) t =
+let float : 'x -> 'x -> ('c, 'x, float) parser =
   fun expecting invalid ->
     let open Syntax in
     let* s1 =
