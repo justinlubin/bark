@@ -1,3 +1,19 @@
+(* Helpers *)
+
+let slice : int -> int -> string -> string =
+  fun lo hi s ->
+    String.sub s lo (hi - lo)
+
+let uncons : string -> (char * string) option =
+  fun s ->
+    let len =
+      String.length s
+    in
+    if len = 0 then
+      None
+    else
+      Some (String.get s 0, String.sub s 1 len)
+
 (* Character Predicates *)
 (* Source: https://stackoverflow.com/a/49184157/1157526 *)
 
@@ -447,10 +463,6 @@ let endd : 'x -> ('c, 'x, unit) t =
 
 (* Chomped Strings *)
 
-let slice : int -> int -> string -> string =
-  fun lo hi s ->
-    String.sub s lo (hi - lo)
-
 let map_chomped_string :
  (string -> 'a -> 'b) -> ('c, 'x, 'a) t -> ('c, 'x, 'b) t =
   fun func parse ->
@@ -868,16 +880,6 @@ let rec nestable_help :
                        nest_level
                  )
         ]
-
-let uncons : string -> (char * string) option =
-  fun s ->
-    let len =
-      String.length s
-    in
-    if len = 0 then
-      None
-    else
-      Some (String.get s 0, String.sub s 1 len)
 
 let nestable_comment : 'x token -> 'x token -> ('c, 'x, unit) t =
   fun (Token (o_str, o_x) as openn) (Token (c_str, c_x) as close) ->
