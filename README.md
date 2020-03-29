@@ -1,6 +1,6 @@
 # bark
 
-This is an **UNOFFICIAL** OCaml port of the
+This is an ***UNOFFICIAL*** OCaml port of the
 [`elm/parser`](https://package.elm-lang.org/packages/elm/parser/1.1.0/) library
 (version 1.1.0) by Evan Czaplicki.
 
