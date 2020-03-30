@@ -30,7 +30,6 @@ let show_problem : problem -> string =
     match p with
       | ExpectingEnd -> "expecting end of string"
 
-
       | ExpectingLeftParen -> "expecting ')"
       | ExpectingRightParen -> "expecting '('"
       | ExpectingComma -> "expecting ','"
@@ -59,6 +58,20 @@ let show_dead_end : (context, problem) dead_end -> string =
     "[row=" ^ string_of_int row ^ ", col=" ^ string_of_int col ^ "] "
       ^ show_problem problem
 
+(* Parser helpers *)
+
+let leftParen =
+  symbol (Token ("(", ExpectingLeftParen))
+
+let rightParen =
+  symbol (Token (")", ExpectingRightParen))
+
+let floatt =
+  Bark.float ExpectingFloat InvalidFloat
+
+let comma =
+  symbol (Token (",", ExpectingComma))
+
 (* Points *)
 
 type point =
@@ -68,15 +81,15 @@ type point =
 
 let point : point parser =
   succeed (fun x y -> {x; y})
-    |. symbol (Token ("(", ExpectingLeftParen))
+    |. leftParen
     |. spaces
-    |= (Bark.float ExpectingFloat InvalidFloat)
+    |= floatt
     |. spaces
-    |. symbol (Token (",", ExpectingComma))
+    |. comma
     |. spaces
-    |= (Bark.float ExpectingFloat InvalidFloat)
+    |= floatt
     |. spaces
-    |. symbol (Token (")", ExpectingRightParen))
+    |. rightParen
 
 let show_point : point -> string =
   fun {x; y} ->
@@ -119,7 +132,7 @@ let rec bool_expr' : unit -> bool_expr parser =
           |. spaces
           |= lazily bool_expr'
       ; succeed (fun b1 op b2 -> op b1 b2)
-          |. symbol (Token ("(", ExpectingLeftParen))
+          |. leftParen
           |. spaces
           |= lazily bool_expr'
           |. spaces
@@ -132,7 +145,7 @@ let rec bool_expr' : unit -> bool_expr parser =
           |. spaces
           |= lazily bool_expr'
           |. spaces
-          |. symbol (Token (")", ExpectingRightParen))
+          |. rightParen
       ]
 
 let bool_expr : bool_expr parser =
