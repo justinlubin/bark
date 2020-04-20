@@ -12,7 +12,7 @@ let uncons : string -> (char * string) option =
     if len = 0 then
       None
     else
-      Some (String.get s 0, String.sub s 1 len)
+      Some (String.get s 0, String.sub s 1 (len - 1))
 
 (* Character Predicates *)
 (* Source: https://stackoverflow.com/a/49184157/1157526 *)
